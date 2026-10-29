@@ -1,1 +1,118 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scanner QR Gerbang</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0C3A2D;color:#fff;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  body{display:flex;flex-direction:column}
+  header{padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#14573F}
+  header b{font-size:16px}
+  #st{font-size:12px;opacity:.85;text-align:right}
+  main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;gap:12px;min-height:0}
+  #rd{width:100%;max-width:480px;border-radius:14px;overflow:hidden;background:#000;min-height:240px}
+  #res{width:100%;max-width:480px;border-radius:14px;padding:14px 16px;display:none;font-size:15px;line-height:1.5}
+  #res b{display:block;font-size:20px;margin-bottom:2px}
+  #res.ok{display:block;background:#1F8A5E}
+  #res.bad{display:block;background:#B3402F}
+  #res.wait{display:block;background:#355F51}
+  footer{padding:12px;display:flex;gap:10px;justify-content:center;background:#0A2F25}
+  button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:10px 16px;background:#fff;color:#14573F;cursor:pointer}
+  button.g{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)}
+</style>
+</head>
+<body>
+<header><b>Scanner QR Gerbang</b><span id="st">Memuat kamera...</span></header>
+<main>
+  <div id="rd"></div>
+  <div id="res"></div>
+</main>
+<footer>
+  <button id="sw" class="g" type="button">Ganti kamera</button>
+  <button id="rs" type="button">Mulai ulang</button>
+</footer>
 
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var ORIGIN = params.get('origin') || '';
+  var ORIGIN_OK = /^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|google\.com)(:\d+)?$/.test(ORIGIN);
+  var st = document.getElementById('st'), res = document.getElementById('res');
+  var scanner = null, facing = 'environment', busy = false, lastKode = '', lastAt = 0, timer = null;
+
+  function tampil(kind, judul, detail) {
+    res.className = kind;
+    res.innerHTML = '';
+    var b = document.createElement('b'); b.textContent = judul; res.appendChild(b);
+    if (detail) res.appendChild(document.createTextNode(detail));
+  }
+  function bunyi(ok) {
+    try {
+      var A = window.AudioContext || window.webkitAudioContext, a = new A(), o = a.createOscillator(), g = a.createGain();
+      o.frequency.value = ok ? 880 : 220; g.gain.value = 0.1; o.connect(g); g.connect(a.destination);
+      o.start(); o.stop(a.currentTime + (ok ? 0.15 : 0.4));
+    } catch (e) {}
+  }
+  function lepas() { busy = false; res.className = ''; st.textContent = 'Siap memindai'; }
+
+  function kirim(kode) {
+    if (!window.opener || !ORIGIN_OK) {
+      tampil('bad', 'Tidak terhubung', 'Buka halaman ini lewat tombol scanner di menu Gerbang pada aplikasi.');
+      return;
+    }
+    busy = true;
+    st.textContent = 'Memvalidasi...';
+    tampil('wait', 'Memvalidasi...', kode);
+    window.opener.postMessage({ type: 'qr-scan', kode: kode }, ORIGIN);
+    clearTimeout(timer);
+    timer = setTimeout(lepas, 8000);
+  }
+
+  window.addEventListener('message', function (e) {
+    if (e.origin !== ORIGIN) return;
+    var d = e.data || {};
+    if (d.type !== 'qr-result') return;
+    tampil(d.ok ? 'ok' : 'bad', String(d.title || ''), String(d.detail || ''));
+    bunyi(!!d.ok);
+    clearTimeout(timer);
+    timer = setTimeout(lepas, 2600);
+  });
+
+  function onScan(text) {
+    var kode = String(text || '').trim();
+    if (!kode || busy) return;
+    var now = Date.now();
+    if (kode === lastKode && now - lastAt < 3000) return;
+    lastKode = kode; lastAt = now;
+    kirim(kode);
+  }
+
+  function mulai() {
+    if (!window.Html5Qrcode) { st.textContent = 'Pustaka scanner gagal dimuat'; tampil('bad', 'Pustaka gagal dimuat', 'Periksa koneksi internet lalu muat ulang halaman.'); return; }
+    var go = function () {
+      scanner = new Html5Qrcode('rd');
+      scanner.start(
+        { facingMode: facing },
+        { fps: 10, qrbox: function (w, h) { var s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } },
+        onScan,
+        function () {}
+      ).then(function () { st.textContent = 'Siap memindai'; })
+       .catch(function () { st.textContent = 'Kamera tidak bisa dibuka'; tampil('bad', 'Kamera tidak bisa dibuka', 'Izinkan akses kamera pada browser lalu tekan Mulai ulang.'); });
+    };
+    if (scanner) { scanner.stop().catch(function () {}).then(function () { try { scanner.clear(); } catch (e) {} go(); }); } else { go(); }
+  }
+
+  document.getElementById('rs').onclick = function () { busy = false; res.className = ''; mulai(); };
+  document.getElementById('sw').onclick = function () { facing = facing === 'environment' ? 'user' : 'environment'; mulai(); };
+
+  if (!ORIGIN_OK || !window.opener) {
+    st.textContent = 'Belum terhubung ke aplikasi';
+  }
+  mulai();
+})();
+</script>
+</body>
+</html>
